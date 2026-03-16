@@ -1,0 +1,74 @@
+name: Update Dune Stats
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # Every day at 8am UTC
+  workflow_dispatch:      # Allow manual trigger
+
+jobs:
+  update-stats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch stats from Dune API
+        id: dune
+        run: |
+          # Fetch Voting Power + Delegators
+          VP_RESPONSE=$(curl -s \
+            -H "X-Dune-API-Key: ${{ secrets.DUNE_API_KEY }}" \
+            "https://api.dune.com/api/v1/query/6832870/results?limit=1")
+          
+          VP=$(echo $VP_RESPONSE | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          row = data.get('result', {}).get('rows', [{}])[0]
+          vp = row.get('voting_power', 0)
+          print(f'{float(vp):,.0f}')
+          " 2>/dev/null || echo "4,364")
+          
+          DELS=$(echo $VP_RESPONSE | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          row = data.get('result', {}).get('rows', [{}])[0]
+          print(row.get('num_delegators', 7))
+          " 2>/dev/null || echo "7")
+
+          # Fetch Participation Rate
+          PART_RESPONSE=$(curl -s \
+            -H "X-Dune-API-Key: ${{ secrets.DUNE_API_KEY }}" \
+            "https://api.dune.com/api/v1/query/6834546/results?limit=1")
+          
+          PART=$(echo $PART_RESPONSE | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          row = data.get('result', {}).get('rows', [{}])[0]
+          pct = row.get('participation_rate_pct', 87.5)
+          print(f'{float(pct):.1f}%')
+          " 2>/dev/null || echo "87.5%")
+
+          echo "vp=$VP" >> $GITHUB_OUTPUT
+          echo "dels=$DELS" >> $GITHUB_OUTPUT
+          echo "part=$PART" >> $GITHUB_OUTPUT
+          echo "Stats — VP: $VP | Part: $PART | Dels: $DELS"
+
+      - name: Update index.html with new stats
+        run: |
+          VP="${{ steps.dune.outputs.vp }}"
+          PART="${{ steps.dune.outputs.part }}"
+          DELS="${{ steps.dune.outputs.dels }}"
+
+          # Update data-value attributes in HTML
+          sed -i "s/id=\"stat-vp\" data-value=\"[^\"]*\"/id=\"stat-vp\" data-value=\"$VP\"/" index.html
+          sed -i "s/id=\"stat-part\" data-value=\"[^\"]*\"/id=\"stat-part\" data-value=\"$PART\"/" index.html
+          sed -i "s/id=\"stat-del\" data-value=\"[^\"]*\"/id=\"stat-del\" data-value=\"$DELS\"/" index.html
+
+          echo "Updated: VP=$VP | Part=$PART | Dels=$DELS"
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --staged --quiet || git commit -m "chore: update stats from Dune [$(date -u '+%Y-%m-%d')]"
+          git push
