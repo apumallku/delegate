@@ -294,8 +294,6 @@ h1 { font-family: 'Orbitron', monospace; font-size: clamp(28px,5vw,48px); font-w
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.1/ethers.umd.min.js"></script>
-<script src="https://unpkg.com/web3modal@1.9.12/dist/index.js"></script>
-<script src="https://unpkg.com/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js"></script>
 <script>
 const DELEGATE_TO = '0x086b62A858D5363820EE5249bF9c6078341c8F85';
 const CONTRACTS = {
@@ -306,26 +304,25 @@ const CONTRACTS = {
 const DELEGATE_ABI = ['function delegate(address delegatee)'];
 let provider = null, signer = null, currentAction = null;
 
-// ── DUNE STATS ───────────────────────────────────────────────────
-const DUNE_API_KEY = '';
-const QUERY_VP_DEL = '';
-const QUERY_PART   = '';
-
+// ── DUNE STATS ────────────────────────────────────────────────────
+const DUNE_API_KEY = 'iKjwpIQwgcFPQfcTSaAzTuBblp0beGm2';
+const QUERY_VP_DEL = '6832870';
+const QUERY_PART   = '6834546';
 async function loadDuneStats() {
-  if (!DUNE_API_KEY || !QUERY_VP_DEL) { setStats('4,364','87.5%','6'); return; }
+  if (!DUNE_API_KEY) { setStats('4,364','87.5%','7'); return; }
   try {
     const [r1,r2] = await Promise.all([
       fetch(`https://api.dune.com/api/v1/query/${QUERY_VP_DEL}/results?limit=1`,{headers:{'X-Dune-API-Key':DUNE_API_KEY}}),
       fetch(`https://api.dune.com/api/v1/query/${QUERY_PART}/results?limit=1`,  {headers:{'X-Dune-API-Key':DUNE_API_KEY}})
     ]);
     const d1=await r1.json(), d2=await r2.json();
-    const row1=d1?.result?.rows?.[0], row2=d2?.result?.rows?.[0];
+    const r=d1?.result?.rows?.[0], p=d2?.result?.rows?.[0];
     setStats(
-      row1?.voting_power ? Number(row1.voting_power).toLocaleString('en',{maximumFractionDigits:0}) : '4,364',
-      row2?.participation_rate_pct ? row2.participation_rate_pct+'%' : '87.5%',
-      row1?.num_delegators ?? '6'
+      r?.voting_power   ? Number(r.voting_power).toLocaleString('en',{maximumFractionDigits:0}) : '—',
+      p?.participation_rate_pct ? p.participation_rate_pct+'%' : '—',
+      r?.num_delegators ?? '—'
     );
-  } catch(e) { setStats('4,364','87.5%','6'); }
+  } catch(e) { setStats('4,364','87.5%','7'); }
 }
 function setStats(vp,part,dels){
   ['stat-vp','stat-part','stat-del'].forEach(id=>document.getElementById(id).classList.remove('loading'));
@@ -334,53 +331,54 @@ function setStats(vp,part,dels){
   document.getElementById('stat-del').textContent=dels;
 }
 
-// ── WEB3MODAL v1 ─────────────────────────────────────────────────
-const WC_PROJECT_ID = '56f5138567cc6a110a351aa57e22c046';
-let web3Modal = null;
-
-function initWeb3Modal() {
-  if (web3Modal) return;
-  const providerOptions = {};
-  // Add WalletConnect if SDK loaded
-  if (window.WalletConnectProvider) {
-    providerOptions.walletconnect = {
-      package: window.WalletConnectProvider.default || window.WalletConnectProvider,
-      options: { projectId: WC_PROJECT_ID, rpc: { 1: 'https://cloudflare-eth.com' } }
-    };
-  }
-  const W3M = window.Web3Modal?.default || window.Web3Modal;
-  web3Modal = new W3M({
-    network: 'mainnet',
-    cacheProvider: false,
-    providerOptions,
-    theme: {
-      background: 'rgb(12, 10, 20)',
-      main: 'rgb(240, 234, 255)',
-      secondary: 'rgb(160, 144, 200)',
-      border: 'rgba(245, 166, 35, 0.3)',
-      hover: 'rgba(245, 166, 35, 0.08)'
-    }
-  });
-}
-
+// ── WALLET ────────────────────────────────────────────────────────
 async function connectWallet() {
+  if (!window.ethereum) {
+    showWalletNotFoundModal();
+    return;
+  }
   try {
-    initWeb3Modal();
-    const instance = await web3Modal.connect();
-    provider = new ethers.BrowserProvider(instance);
-    signer = await provider.getSigner();
+    // This triggers the wallet's native connection UI (MetaMask, Rabby, Brave, etc.)
+    provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send('eth_requestAccounts', []);
+    signer   = await provider.getSigner();
     const addr = await signer.getAddress();
     onWalletConnected(addr);
-    if (instance.on) {
-      instance.on('accountsChanged', accounts => {
-        if (accounts.length === 0) onWalletDisconnected();
-        else { provider.getSigner().then(s => { signer = s; s.getAddress().then(onWalletConnected); }); }
-      });
-      instance.on('disconnect', () => onWalletDisconnected());
-    }
+
+    window.ethereum.on('accountsChanged', accounts => {
+      if (accounts.length === 0) onWalletDisconnected();
+      else {
+        provider = new ethers.BrowserProvider(window.ethereum);
+        provider.getSigner().then(s => { signer = s; s.getAddress().then(onWalletConnected); });
+      }
+    });
+    window.ethereum.on('chainChanged', () => window.location.reload());
   } catch(e) {
-    if (e !== 'Modal closed by user') showStatus('Connection cancelled.', 'error');
+    if (e.code !== 4001) showStatus('Connection failed: ' + (e.message || e), 'error');
   }
+}
+
+function showWalletNotFoundModal() {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(5,4,10,0.95);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+  el.innerHTML = `
+    <div style="background:#0c0a14;border:1px solid rgba(245,166,35,0.5);border-radius:16px;padding:36px;max-width:380px;width:90%;text-align:center;position:relative;">
+      <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#9b6dff,#f5a623,#00e5c8);border-radius:16px 16px 0 0;"></div>
+      <div style="font-size:40px;margin-bottom:16px;">🦊</div>
+      <h3 style="font-family:'Orbitron',monospace;font-size:16px;color:#f5a623;margin-bottom:10px;">NO WALLET DETECTED</h3>
+      <p style="font-family:'Rajdhani',sans-serif;font-size:14px;color:#a090c8;margin-bottom:24px;line-height:1.6;">Install a Web3 wallet to delegate your voting power.</p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <a href="https://metamask.io" target="_blank" style="display:flex;align-items:center;gap:12px;padding:12px 18px;background:#130f1e;border:1px solid rgba(245,166,35,0.2);border-radius:10px;text-decoration:none;color:#f0eaff;font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:600;">
+          <span style="font-size:22px;">🦊</span> Install MetaMask
+        </a>
+        <a href="https://rabby.io" target="_blank" style="display:flex;align-items:center;gap:12px;padding:12px 18px;background:#130f1e;border:1px solid rgba(245,166,35,0.2);border-radius:10px;text-decoration:none;color:#f0eaff;font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:600;">
+          <span style="font-size:22px;">🐰</span> Install Rabby
+        </a>
+      </div>
+      <button onclick="this.closest('div[style*=fixed]').remove()" style="margin-top:20px;background:none;border:none;color:#5a4d7a;font-family:'Share Tech Mono',monospace;font-size:11px;cursor:pointer;letter-spacing:0.1em;">CLOSE ✕</button>
+    </div>`;
+  document.body.appendChild(el);
+  el.addEventListener('click', e => { if(e.target===el) el.remove(); });
 }
 
 function onWalletConnected(addr) {
@@ -389,37 +387,33 @@ function onWalletConnected(addr) {
   document.querySelectorAll('#wallet-dot').forEach(el=>el.className='dot-status on');
   const btn = document.getElementById('connect-btn');
   if(btn){
-    btn.innerHTML = '<span class="dot-status on"></span>' + short + ' <span style="opacity:0.5;margin-left:6px;font-size:9px;">✕</span>';
+    btn.innerHTML = '<span class="dot-status on"></span>' + short + ' <span style="opacity:0.4;margin-left:6px;font-size:9px;">✕</span>';
     btn.onclick = disconnectWallet;
   }
-  showStatus('✓ Wallet connected: ' + addr, 'success');
+  showStatus('✓ Connected: ' + addr, 'success');
 }
 
 function onWalletDisconnected() {
   provider = null; signer = null;
-  if (web3Modal) { web3Modal.clearCachedProvider(); web3Modal = null; }
   document.querySelectorAll('#wallet-status').forEach(el=>{ el.textContent='Not connected'; el.className=''; });
   document.querySelectorAll('#wallet-dot').forEach(el=>el.className='dot-status');
   const btn = document.getElementById('connect-btn');
-  if(btn){ btn.innerHTML='<span class="dot-status" id="wallet-dot"></span>CONNECT WALLET'; btn.onclick=connectWallet; }
+  if(btn){ btn.innerHTML='<span class="dot-status"></span>CONNECT WALLET'; btn.onclick=connectWallet; }
 }
 
 function disconnectWallet() { onWalletDisconnected(); }
 
-// ── MODAL ─────────────────────────────────────────────────────────
+// ── DELEGATION MODAL ──────────────────────────────────────────────
 const MODAL_TITLES = {
-  all:     '◆ DELEGATE ALL TOKENS',
-  aave:    '◆ DELEGATE AAVE',
-  stkaave: '◆ DELEGATE stkAAVE',
-  aaave:   '◆ DELEGATE aAAVE',
+  all:'◆ DELEGATE ALL TOKENS', aave:'◆ DELEGATE AAVE',
+  stkaave:'◆ DELEGATE stkAAVE', aaave:'◆ DELEGATE aAAVE'
 };
 const MODAL_DESCS = {
-  all:     'Delegate your AAVE, stkAAVE and aAAVE (3 transactions) to apumallku.eth.',
-  aave:    'Delegate your AAVE token voting power to apumallku.eth (1 transaction).',
-  stkaave: 'Delegate your stkAAVE voting power to apumallku.eth (1 transaction).',
-  aaave:   'Delegate your aAAVE (supplied AAVE) voting power to apumallku.eth (1 transaction).',
+  all:    'Delegate your AAVE, stkAAVE and aAAVE (3 transactions) to apumallku.eth.',
+  aave:   'Delegate your AAVE token voting power to apumallku.eth (1 transaction).',
+  stkaave:'Delegate your stkAAVE voting power to apumallku.eth (1 transaction).',
+  aaave:  'Delegate your aAAVE (supplied AAVE) voting power to apumallku.eth (1 transaction).',
 };
-
 function openModal(type) {
   currentAction = type;
   document.getElementById('modal-title').textContent = MODAL_TITLES[type];
@@ -437,8 +431,9 @@ async function confirmDelegate() {
   closeModal();
   if (!signer) {
     await connectWallet();
+    // Wait for connection (up to 15s)
     let waited = 0;
-    while (!signer && waited < 10000) { await new Promise(r=>setTimeout(r,500)); waited+=500; }
+    while (!signer && waited < 15000) { await new Promise(r=>setTimeout(r,300)); waited+=300; }
     if (!signer) { showStatus('Please connect your wallet first.', 'error'); return; }
   }
   const tokens = action === 'all' ? ['aave','stkaave','aaave'] : [action];
@@ -452,10 +447,14 @@ async function delegateToken(type) {
     if (!signer && provider) signer = await provider.getSigner();
     if (!signer) { showStatus('Wallet not connected.', 'error'); return; }
     const network = await provider.getNetwork();
-    if (network.chainId !== 1n) { showStatus('Please switch to Ethereum Mainnet.', 'error'); return; }
+    if (network.chainId !== 1n) {
+      showStatus('Please switch to Ethereum Mainnet.', 'error');
+      try { await window.ethereum.request({ method:'wallet_switchEthereumChain', params:[{chainId:'0x1'}] }); } catch(e) {}
+      return;
+    }
     const contract = new ethers.Contract(c.address, DELEGATE_ABI, signer);
     const tx = await contract.delegate(DELEGATE_TO);
-    showStatus('⟳ ' + c.name + ' tx sent. Waiting...', 'pending');
+    showStatus('⟳ ' + c.name + ' tx sent. Confirming...', 'pending');
     await tx.wait();
     showStatus('✓ ' + c.name + ' delegated! <a class="tx-link" href="https://etherscan.io/tx/'+tx.hash+'" target="_blank">View on Etherscan ↗</a>', 'success');
   } catch(e) {
@@ -466,7 +465,7 @@ async function delegateToken(type) {
 function showStatus(msg, type) {
   const bar = document.getElementById('status-bar');
   bar.innerHTML = msg; bar.className = 'show ' + type;
-  bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  bar.scrollIntoView({ behavior:'smooth', block:'nearest' });
 }
 
 document.getElementById('modal').addEventListener('click', e => {
