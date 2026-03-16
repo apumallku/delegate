@@ -164,7 +164,7 @@ h1 { font-family: 'Orbitron', monospace; font-size: clamp(28px,5vw,48px); font-w
 </head>
 <body>
 
-<nav style="position:fixed;top:0;left:0;right:0;z-index:150;display:flex;justify-content:space-between;align-items:center;padding:16px 28px;background:rgba(5,4,10,0.85);backdrop-filter:blur(10px);border-bottom:1px solid rgba(245,166,35,0.15);">
+<nav style="position:fixed;top:0;left:0;right:0;z-index:50;display:flex;justify-content:space-between;align-items:center;padding:16px 28px;background:rgba(5,4,10,0.85);backdrop-filter:blur(10px);border-bottom:1px solid rgba(245,166,35,0.15);">
   <span style="font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:0.2em;color:rgba(245,166,35,0.6);text-transform:uppercase;">apumallku.eth</span>
   <div style="display:flex;align-items:center;gap:10px;">
     <span id="wallet-status" style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#5a4d7a;">Not connected</span>
@@ -309,77 +309,167 @@ const DUNE_API_KEY = 'Z9UZTJQE3aLps4MWpCs7eX5J1HoONuHE';
 const QUERY_VP_DEL = '6832870';
 const QUERY_PART   = '6834546';
 async function loadDuneStats() {
-  // Stats updated automatically by GitHub Action daily
-  // See .github/workflows/update-stats.yml
   setStats(
     document.getElementById('stat-vp').dataset.value   || '4,364',
     document.getElementById('stat-part').dataset.value || '87.5%',
     document.getElementById('stat-del').dataset.value  || '7'
   );
 }
-function setStats(vp,part,dels){
-  ['stat-vp','stat-part','stat-del'].forEach(id=>document.getElementById(id).classList.remove('loading'));
-  document.getElementById('stat-vp').textContent=vp;
-  document.getElementById('stat-part').textContent=part;
-  document.getElementById('stat-del').textContent=dels;
+function setStats(vp, part, dels) {
+  ['stat-vp','stat-part','stat-del'].forEach(id => document.getElementById(id).classList.remove('loading'));
+  document.getElementById('stat-vp').textContent   = vp;
+  document.getElementById('stat-part').textContent = part;
+  document.getElementById('stat-del').textContent  = dels;
 }
 
-// ── WALLET ────────────────────────────────────────────────────────
-async function connectWallet() {
-  if (!window.ethereum) {
-    showWalletNotFoundModal();
-    return;
+// ── EIP-6963 WALLET DETECTION ─────────────────────────────────────
+// Modern standard: all major wallets announce themselves
+const detectedWallets = new Map();
+
+window.addEventListener('eip6963:announceProvider', (event) => {
+  const { info, provider: p } = event.detail;
+  detectedWallets.set(info.uuid, { info, provider: p });
+  // Refresh modal if open
+  if (document.getElementById('wallet-modal')) renderWalletList();
+});
+
+// Request wallets to announce
+window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+function getWalletIcon(name, icon) {
+  if (icon) return `<img src="${icon}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">`;
+  const n = name.toLowerCase();
+  if (n.includes('metamask'))  return '<span style="font-size:32px;">🦊</span>';
+  if (n.includes('rabby'))     return '<span style="font-size:32px;">🐰</span>';
+  if (n.includes('coinbase'))  return '<span style="font-size:32px;">🔵</span>';
+  if (n.includes('brave'))     return '<span style="font-size:32px;">🦁</span>';
+  if (n.includes('rainbow'))   return '<span style="font-size:32px;">🌈</span>';
+  return '<span style="font-size:32px;">💼</span>';
+}
+
+function renderWalletList() {
+  const list = document.getElementById('wallet-list');
+  if (!list) return;
+  const wallets = [...detectedWallets.values()];
+
+  if (wallets.length === 0) {
+    list.innerHTML = `
+      <div style="text-align:center;padding:20px;">
+        <div style="font-size:40px;margin-bottom:12px;">🔍</div>
+        <p style="color:#a090c8;font-size:14px;margin-bottom:16px;">No wallets detected.<br>Install a wallet to continue.</p>
+        <a href="https://metamask.io" target="_blank" style="display:block;padding:12px;background:#130f1e;border:1px solid rgba(245,166,35,0.3);border-radius:8px;color:#f0eaff;text-decoration:none;font-family:'Rajdhani',sans-serif;font-size:14px;margin-bottom:8px;">🦊 Install MetaMask</a>
+        <a href="https://rabby.io"    target="_blank" style="display:block;padding:12px;background:#130f1e;border:1px solid rgba(245,166,35,0.3);border-radius:8px;color:#f0eaff;text-decoration:none;font-family:'Rajdhani',sans-serif;font-size:14px;">🐰 Install Rabby</a>
+      </div>`;
+  } else {
+    list.innerHTML = wallets.map(({ info }) => `
+      <button
+        onclick="selectWallet('${info.uuid}')"
+        style="display:flex;align-items:center;gap:14px;width:100%;padding:14px 16px;background:#0c0a14;border:1px solid rgba(245,166,35,0.15);border-radius:10px;cursor:pointer;color:#f0eaff;font-family:'Rajdhani',sans-serif;font-size:16px;font-weight:600;text-align:left;transition:all 0.2s;"
+        onmouseover="this.style.borderColor='rgba(245,166,35,0.6)';this.style.background='rgba(245,166,35,0.06)';"
+        onmouseout="this.style.borderColor='rgba(245,166,35,0.15)';this.style.background='#0c0a14';">
+        ${getWalletIcon(info.name, info.icon)}
+        <span>${info.name}</span>
+        <span style="margin-left:auto;font-size:10px;color:#5a4d7a;font-family:'Share Tech Mono',monospace;letter-spacing:0.1em;">DETECTED</span>
+      </button>`).join('');
   }
+}
+
+function openWalletModal() {
+  if (document.getElementById('wallet-modal')) return;
+  // Re-request announcements in case new wallets were installed
+  window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+  const overlay = document.createElement('div');
+  overlay.id = 'wallet-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(5,4,10,0.92);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(12px);animation:fadeIn 0.2s ease;';
+
+  overlay.innerHTML = `
+    <div style="background:#05040a;border:1px solid rgba(245,166,35,0.4);border-radius:20px;padding:28px;max-width:420px;width:calc(100% - 32px);position:relative;box-shadow:0 0 80px rgba(245,166,35,0.08);">
+      <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#9b6dff,#f5a623,#00e5c8);border-radius:20px 20px 0 0;"></div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <div>
+          <h3 style="font-family:'Orbitron',monospace;font-size:15px;color:#f5a623;font-weight:700;letter-spacing:0.05em;margin-bottom:2px;">CONNECT WALLET</h3>
+          <p style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5a4d7a;letter-spacing:0.1em;">SELECT YOUR WALLET TO DELEGATE</p>
+        </div>
+        <button onclick="closeWalletModal()" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#a090c8;width:32px;height:32px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;">✕</button>
+      </div>
+
+      <div id="wallet-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+
+      <p style="font-family:'Share Tech Mono',monospace;font-size:9px;color:#3a2d5a;margin-top:18px;text-align:center;letter-spacing:0.05em;">
+        DELEGATION ONLY · NO BALANCE CHANGE · REVOCABLE ANYTIME
+      </p>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if(e.target === overlay) closeWalletModal(); });
+  renderWalletList();
+}
+
+function closeWalletModal() {
+  document.getElementById('wallet-modal')?.remove();
+}
+
+async function selectWallet(uuid) {
+  const wallet = detectedWallets.get(uuid);
+  if (!wallet) return;
+
+  closeWalletModal();
+
+  // Show connecting overlay
+  showConnectingOverlay(wallet.info.name);
+
   try {
-    // This triggers the wallet's native connection UI (MetaMask, Rabby, Brave, etc.)
-    provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send('eth_requestAccounts', []);
+    const eip1193Provider = wallet.provider;
+    await eip1193Provider.request({ method: 'eth_requestAccounts' });
+    provider = new ethers.BrowserProvider(eip1193Provider);
     signer   = await provider.getSigner();
     const addr = await signer.getAddress();
+
+    hideConnectingOverlay();
     onWalletConnected(addr);
 
-    window.ethereum.on('accountsChanged', accounts => {
+    eip1193Provider.on?.('accountsChanged', accounts => {
       if (accounts.length === 0) onWalletDisconnected();
       else {
-        provider = new ethers.BrowserProvider(window.ethereum);
+        provider = new ethers.BrowserProvider(eip1193Provider);
         provider.getSigner().then(s => { signer = s; s.getAddress().then(onWalletConnected); });
       }
     });
-    window.ethereum.on('chainChanged', () => window.location.reload());
+    eip1193Provider.on?.('disconnect', () => onWalletDisconnected());
+
   } catch(e) {
+    hideConnectingOverlay();
     if (e.code !== 4001) showStatus('Connection failed: ' + (e.message || e), 'error');
   }
 }
 
-function showWalletNotFoundModal() {
+function showConnectingOverlay(walletName) {
   const el = document.createElement('div');
-  el.style.cssText = 'position:fixed;inset:0;background:rgba(5,4,10,0.95);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+  el.id = 'connecting-overlay';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(5,4,10,0.92);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(12px);';
   el.innerHTML = `
-    <div style="background:#0c0a14;border:1px solid rgba(245,166,35,0.5);border-radius:16px;padding:36px;max-width:380px;width:90%;text-align:center;position:relative;">
-      <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#9b6dff,#f5a623,#00e5c8);border-radius:16px 16px 0 0;"></div>
-      <div style="font-size:40px;margin-bottom:16px;">🦊</div>
-      <h3 style="font-family:'Orbitron',monospace;font-size:16px;color:#f5a623;margin-bottom:10px;">NO WALLET DETECTED</h3>
-      <p style="font-family:'Rajdhani',sans-serif;font-size:14px;color:#a090c8;margin-bottom:24px;line-height:1.6;">Install a Web3 wallet to delegate your voting power.</p>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <a href="https://metamask.io" target="_blank" style="display:flex;align-items:center;gap:12px;padding:12px 18px;background:#130f1e;border:1px solid rgba(245,166,35,0.2);border-radius:10px;text-decoration:none;color:#f0eaff;font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:600;">
-          <span style="font-size:22px;">🦊</span> Install MetaMask
-        </a>
-        <a href="https://rabby.io" target="_blank" style="display:flex;align-items:center;gap:12px;padding:12px 18px;background:#130f1e;border:1px solid rgba(245,166,35,0.2);border-radius:10px;text-decoration:none;color:#f0eaff;font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:600;">
-          <span style="font-size:22px;">🐰</span> Install Rabby
-        </a>
-      </div>
-      <button onclick="this.closest('div[style*=fixed]').remove()" style="margin-top:20px;background:none;border:none;color:#5a4d7a;font-family:'Share Tech Mono',monospace;font-size:11px;cursor:pointer;letter-spacing:0.1em;">CLOSE ✕</button>
+    <div style="text-align:center;">
+      <div style="width:56px;height:56px;border:2px solid rgba(245,166,35,0.2);border-top-color:#f5a623;border-radius:50%;animation:rotate-ring 0.8s linear infinite;margin:0 auto 20px;"></div>
+      <p style="font-family:'Orbitron',monospace;font-size:13px;color:#f5a623;letter-spacing:0.1em;">CONNECTING</p>
+      <p style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#5a4d7a;margin-top:6px;">Approve in ${walletName}...</p>
     </div>`;
   document.body.appendChild(el);
-  el.addEventListener('click', e => { if(e.target===el) el.remove(); });
 }
 
+function hideConnectingOverlay() {
+  document.getElementById('connecting-overlay')?.remove();
+}
+
+function connectWallet() { openWalletModal(); }
+
 function onWalletConnected(addr) {
-  const short = addr.slice(0,6)+'...'+addr.slice(-4);
-  document.querySelectorAll('#wallet-status').forEach(el=>{ el.textContent=short; el.className='connected'; });
-  document.querySelectorAll('#wallet-dot').forEach(el=>el.className='dot-status on');
+  const short = addr.slice(0,6) + '...' + addr.slice(-4);
+  document.querySelectorAll('#wallet-status').forEach(el => { el.textContent = short; el.className = 'connected'; });
+  document.querySelectorAll('#wallet-dot').forEach(el => el.className = 'dot-status on');
   const btn = document.getElementById('connect-btn');
-  if(btn){
+  if (btn) {
     btn.innerHTML = '<span class="dot-status on"></span>' + short + ' <span style="opacity:0.4;margin-left:6px;font-size:9px;">✕</span>';
     btn.onclick = disconnectWallet;
   }
@@ -388,10 +478,10 @@ function onWalletConnected(addr) {
 
 function onWalletDisconnected() {
   provider = null; signer = null;
-  document.querySelectorAll('#wallet-status').forEach(el=>{ el.textContent='Not connected'; el.className=''; });
-  document.querySelectorAll('#wallet-dot').forEach(el=>el.className='dot-status');
+  document.querySelectorAll('#wallet-status').forEach(el => { el.textContent = 'Not connected'; el.className = ''; });
+  document.querySelectorAll('#wallet-dot').forEach(el => el.className = 'dot-status');
   const btn = document.getElementById('connect-btn');
-  if(btn){ btn.innerHTML='<span class="dot-status"></span>CONNECT WALLET'; btn.onclick=connectWallet; }
+  if (btn) { btn.innerHTML = '<span class="dot-status"></span>CONNECT WALLET'; btn.onclick = connectWallet; }
 }
 
 function disconnectWallet() { onWalletDisconnected(); }
@@ -423,10 +513,9 @@ async function confirmDelegate() {
   const action = currentAction;
   closeModal();
   if (!signer) {
-    await connectWallet();
-    // Wait for connection (up to 15s)
+    openWalletModal();
     let waited = 0;
-    while (!signer && waited < 15000) { await new Promise(r=>setTimeout(r,300)); waited+=300; }
+    while (!signer && waited < 30000) { await new Promise(r => setTimeout(r, 300)); waited += 300; }
     if (!signer) { showStatus('Please connect your wallet first.', 'error'); return; }
   }
   const tokens = action === 'all' ? ['aave','stkaave','aaave'] : [action];
@@ -442,7 +531,7 @@ async function delegateToken(type) {
     const network = await provider.getNetwork();
     if (network.chainId !== 1n) {
       showStatus('Please switch to Ethereum Mainnet.', 'error');
-      try { await window.ethereum.request({ method:'wallet_switchEthereumChain', params:[{chainId:'0x1'}] }); } catch(e) {}
+      try { await window.ethereum?.request({ method:'wallet_switchEthereumChain', params:[{chainId:'0x1'}] }); } catch(e) {}
       return;
     }
     const contract = new ethers.Contract(c.address, DELEGATE_ABI, signer);
@@ -466,9 +555,9 @@ document.getElementById('modal').addEventListener('click', e => {
 });
 
 const cb = document.getElementById('connect-btn');
-if(cb){
-  cb.addEventListener('mouseover', ()=>{ cb.style.background='rgba(245,166,35,0.1)'; cb.style.borderColor='#f5a623'; });
-  cb.addEventListener('mouseout',  ()=>{ cb.style.background='transparent'; cb.style.borderColor='rgba(245,166,35,0.5)'; });
+if (cb) {
+  cb.addEventListener('mouseover', () => { cb.style.background='rgba(245,166,35,0.1)'; cb.style.borderColor='#f5a623'; });
+  cb.addEventListener('mouseout',  () => { cb.style.background='transparent'; cb.style.borderColor='rgba(245,166,35,0.5)'; });
 }
 
 loadDuneStats();
