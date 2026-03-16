@@ -202,17 +202,17 @@ h1 { font-family: 'Orbitron', monospace; font-size: clamp(28px,5vw,48px); font-w
 
   <div class="stats-row">
     <div class="stat">
-      <span class="stat-val loading" id="stat-vp">...</span>
+      <span class="stat-val loading" id="stat-vp" data-value="4,364">...</span>
       <span class="stat-label">Voting Power</span>
       <span class="stat-live">AAVE</span>
     </div>
     <div class="stat">
-      <span class="stat-val loading" id="stat-part">...</span>
+      <span class="stat-val loading" id="stat-part" data-value="87.5%">...</span>
       <span class="stat-label">Participation</span>
       <span class="stat-live">On-chain proposals</span>
     </div>
     <div class="stat">
-      <span class="stat-val loading" id="stat-del">...</span>
+      <span class="stat-val loading" id="stat-del" data-value="7">...</span>
       <span class="stat-label">Delegators</span>
       <span class="stat-live">Unique wallets</span>
     </div>
@@ -305,24 +305,17 @@ const DELEGATE_ABI = ['function delegate(address delegatee)'];
 let provider = null, signer = null, currentAction = null;
 
 // ── DUNE STATS ────────────────────────────────────────────────────
-const DUNE_API_KEY = 'iKjwpIQwgcFPQfcTSaAzTuBblp0beGm2';
+const DUNE_API_KEY = 'Z9UZTJQE3aLps4MWpCs7eX5J1HoONuHE';
 const QUERY_VP_DEL = '6832870';
 const QUERY_PART   = '6834546';
 async function loadDuneStats() {
-  if (!DUNE_API_KEY) { setStats('4,364','87.5%','7'); return; }
-  try {
-    const [r1,r2] = await Promise.all([
-      fetch(`https://api.dune.com/api/v1/query/${QUERY_VP_DEL}/results?limit=1`,{headers:{'X-Dune-API-Key':DUNE_API_KEY}}),
-      fetch(`https://api.dune.com/api/v1/query/${QUERY_PART}/results?limit=1`,  {headers:{'X-Dune-API-Key':DUNE_API_KEY}})
-    ]);
-    const d1=await r1.json(), d2=await r2.json();
-    const r=d1?.result?.rows?.[0], p=d2?.result?.rows?.[0];
-    setStats(
-      r?.voting_power   ? Number(r.voting_power).toLocaleString('en',{maximumFractionDigits:0}) : '—',
-      p?.participation_rate_pct ? p.participation_rate_pct+'%' : '—',
-      r?.num_delegators ?? '—'
-    );
-  } catch(e) { setStats('4,364','87.5%','7'); }
+  // Stats updated automatically by GitHub Action daily
+  // See .github/workflows/update-stats.yml
+  setStats(
+    document.getElementById('stat-vp').dataset.value   || '4,364',
+    document.getElementById('stat-part').dataset.value || '87.5%',
+    document.getElementById('stat-del').dataset.value  || '7'
+  );
 }
 function setStats(vp,part,dels){
   ['stat-vp','stat-part','stat-del'].forEach(id=>document.getElementById(id).classList.remove('loading'));
